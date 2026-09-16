@@ -1,0 +1,26 @@
+[
+  {
+    "query": "What does RAG combine?",
+    "expected": "RAG combines retrieval with generation"
+  },
+  {
+    "query": "What do machine learning models learn?",
+    "expected": "Machine learning models learn patterns from data"
+  },
+  {
+    "query": "What do retrieval systems search for?",
+    "expected": "Retrieval systems search for information relevant"
+  },
+  {
+    "query": "What do language models generate?",
+    "expected": "Language models generate text"
+  },
+  {
+    "query": "What do language models use when generating text?",
+    "expected": "context they receive"
+  },
+  {
+    "query": "Why is retrieval useful for RAG?",
+    "expected": "using external sources"
+  }
+]
