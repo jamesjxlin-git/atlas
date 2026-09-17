@@ -19,11 +19,11 @@ def split_text(
     overlap: int = 120
 ) -> List[Chunk]:
 
-    # Store completed chunks and track where the next chunk begins
+    #Store completed chunks and track where the next chunk begins
     chunks = []
     start = 0
 
-    # Create fixed-size chunks while preserving some text between neighboring chunks
+    #Create fixed-size chunks while preserving some text between neighboring chunks
     while start < len(text):
         end = min(start + size, len(text))
 
@@ -36,11 +36,11 @@ def split_text(
 
         chunks.append(piece)
 
-        # Stop after reaching the end of the document
+        #Stop after reaching the end of the document
         if end == len(text):
             break
 
-        # Move forward while retaining context from the previous chunk
+        #Move forward while retaining context from the previous chunk
         start = end - overlap
 
     return chunks
@@ -52,7 +52,7 @@ def split_sentences(
     size: int = 800
 ) -> List[Chunk]:
 
-    # Find sentence-like units while preserving their positions in the original document
+    #Find sentence-like units while preserving their positions in the original document
     matches = re.finditer(
         r".+?(?:[.!?](?=\s|$)|$)",
         text,
@@ -79,14 +79,14 @@ def split_sentences(
     chunk_end = None
     current_length = 0
 
-    # Combine complete sentences until adding another would exceed the target size
+    #Combine complete sentences until adding another would exceed the target size
     for sentence, start, end in sentences:
         sentence_length = len(sentence)
 
         if not current:
             chunk_start = start
 
-        # Finish the current chunk before adding a sentence that would make it too large
+        #Finish the current chunk before adding a sentence that would make it too large
         if current and current_length + 1 + sentence_length > size:
             chunks.append(
                 Chunk(
@@ -101,7 +101,7 @@ def split_sentences(
             current_length = 0
             chunk_start = start
 
-        # Add the sentence to the chunk currently being built
+        #Add the sentence to the chunk currently being built
         current.append(sentence)
 
         if current_length == 0:
@@ -111,7 +111,7 @@ def split_sentences(
 
         chunk_end = end
 
-    # Save the final chunk because the loop ends before another sentence can trigger it
+    #Save the final chunk because the loop ends before another sentence can trigger it
     if current:
         chunks.append(
             Chunk(

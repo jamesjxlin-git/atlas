@@ -22,7 +22,7 @@ chunks = split_text(
     size=100,
     overlap=20
 )
-# Improved approach: preserve complete sentence boundaries
+#Improved approach: preserve complete sentence boundaries
 chunks = split_sentences(
     sample,
     source="sample",
@@ -33,7 +33,7 @@ chunks = split_sentences(
 retriever = Retriever()
 retriever.index(chunks)
 
-# Load the reranking model once so it can rescore retrieved candidates
+#Load the reranking model once so it can rescore retrieved candidates
 reranker = Reranker()
 
 
@@ -49,16 +49,16 @@ rerank_hit1_total = 0
 rerank_hit3_total = 0
 
 
-# Compare the original dense retrieval ranking with the reranked results
+#Compare the original dense retrieval ranking with the reranked results
 for test in tests:
 
-    # Retrieve a broader candidate set before reranking
+    #Retrieve a broader candidate set before reranking
     retrieved = retriever.search(
         test["query"],
         k=4
     )
 
-    # Rescore the retrieved candidates and keep the best three
+    #Rescore the retrieved candidates and keep the best three
     reranked = reranker.rerank(
         test["query"],
         retrieved,
