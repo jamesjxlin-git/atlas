@@ -1,0 +1,2 @@
+Synthetic research fixture: main findings.
+In the cohort of 500 students, participants reporting at least seven hours of sleep had a mean examination score of 78, compared with 71 among participants reporting less than seven hours. Sleep duration and examination performance were associated in this sample. The reported association does not establish causation. No confidence interval or adjusted effect estimate is provided in this fixture.

@@ -2,4 +2,16 @@
 __pycache__/
 *.pyc
 .env
+.env.*
+!.env.example
 .DS_Store
+.cache/
+.pytest_cache/
+.atlas-backups/
+reports/
+data/private/
+.streamlit/secrets.toml
+!data/evaluation/rag_cases.json
+!data/evaluation/retrieval_cases.json
+!data/examples/rag_notes.txt
+!data/examples/sleep_study.txt

@@ -1,0 +1,114 @@
+[
+  {
+    "query": "How many participants were enrolled, and what was their age range?",
+    "answerable": true,
+    "label_scope": "complete_corpus",
+    "reviewer": "Synthetic fixture author; not independent user validation",
+    "labels": {
+      "7cb1848f68803725c91741b1": {
+        "grade": 3,
+        "rationale": "Gives both 500 participants and ages 18 to 25."
+      },
+      "86638fbf9fd9281cc28195db": {
+        "grade": 2,
+        "rationale": "Gives the participant count but omits age range."
+      },
+      "5503cc46e3aa892370f7ff70": {
+        "grade": 1,
+        "rationale": "Study-specific background; no count or age range."
+      },
+      "cdfca5eb5f88b9c23a593396": {
+        "grade": 1,
+        "rationale": "General student/sleep background only."
+      },
+      "d09a3cf1248f3b4d7404febc": {
+        "grade": 0,
+        "rationale": "Geology project is outside the question scope."
+      }
+    }
+  },
+  {
+    "query": "What examination scores were reported for the two sleep-duration groups?",
+    "answerable": true,
+    "label_scope": "complete_corpus",
+    "reviewer": "Synthetic fixture author; not independent user validation",
+    "labels": {
+      "7cb1848f68803725c91741b1": {
+        "grade": 1,
+        "rationale": "Methods context gives no group score results."
+      },
+      "86638fbf9fd9281cc28195db": {
+        "grade": 3,
+        "rationale": "Gives both means (78 and 71) and the seven-hour grouping."
+      },
+      "5503cc46e3aa892370f7ff70": {
+        "grade": 1,
+        "rationale": "Limitations supply context rather than numerical group scores."
+      },
+      "cdfca5eb5f88b9c23a593396": {
+        "grade": 1,
+        "rationale": "General background supplies no study findings."
+      },
+      "d09a3cf1248f3b4d7404febc": {
+        "grade": 0,
+        "rationale": "Geology evidence cannot answer a sleep-study question."
+      }
+    }
+  },
+  {
+    "query": "Why does the study not establish that longer sleep causes better examination performance?",
+    "answerable": true,
+    "label_scope": "complete_corpus",
+    "reviewer": "Synthetic fixture author; not independent user validation",
+    "labels": {
+      "7cb1848f68803725c91741b1": {
+        "grade": 2,
+        "rationale": "Explains observational design/no random assignment, but omits named confounders."
+      },
+      "86638fbf9fd9281cc28195db": {
+        "grade": 2,
+        "rationale": "States association is not causation without explaining potential confounding."
+      },
+      "5503cc46e3aa892370f7ff70": {
+        "grade": 3,
+        "rationale": "Explains confounding by stress/study time and the observational design."
+      },
+      "cdfca5eb5f88b9c23a593396": {
+        "grade": 1,
+        "rationale": "General background does not address causal identification."
+      },
+      "d09a3cf1248f3b4d7404febc": {
+        "grade": 0,
+        "rationale": "Unrelated geological study."
+      }
+    }
+  },
+  {
+    "query": "What is the name of the university where participants were recruited?",
+    "answerable": false,
+    "label_scope": "complete_corpus",
+    "reviewer": "Synthetic fixture author; not independent user validation",
+    "labels": {
+      "7cb1848f68803725c91741b1": {
+        "grade": 0,
+        "rationale": "Mentions a single campus without naming it."
+      },
+      "86638fbf9fd9281cc28195db": {
+        "grade": 0,
+        "rationale": "Does not identify a university."
+      },
+      "5503cc46e3aa892370f7ff70": {
+        "grade": 0,
+        "rationale": "Does not identify the campus."
+      },
+      "cdfca5eb5f88b9c23a593396": {
+        "grade": 0,
+        "rationale": "General background does not name the recruitment institution."
+      },
+      "d09a3cf1248f3b4d7404febc": {
+        "grade": 0,
+        "rationale": "Unrelated project."
+      }
+    }
+  }
+]

@@ -1,0 +1,54 @@
+[
+  {
+    "query": "What does RAG combine?",
+    "expected": "RAG combines retrieval with generation",
+    "answer_contains": [
+      "retrieval",
+      "generation"
+    ]
+  },
+  {
+    "query": "What do machine learning models learn?",
+    "expected": "Machine learning models learn patterns from data",
+    "answer_contains": [
+      "patterns",
+      "data"
+    ]
+  },
+  {
+    "query": "How many university students were recruited?",
+    "expected": "We recruited 500 university students",
+    "answer_contains": [
+      "500"
+    ]
+  },
+  {
+    "query": "What was the relationship between seven to nine hours of sleep and exam performance?",
+    "expected": "Students sleeping seven to nine hours had higher average exam scores",
+    "answer_contains": [
+      "higher"
+    ]
+  },
+  {
+    "query": "Does the study establish that increasing sleep causes higher exam scores?",
+    "expected": "The study does not establish that increasing sleep causes higher exam scores",
+    "answer_contains": [
+      "caus"
+    ]
+  },
+  {
+    "query": "Which variable did the analysis control for?",
+    "expected": "The analysis controlled for participant age",
+    "answer_contains": [
+      "age"
+    ]
+  },
+  {
+    "query": "At which named university were the students recruited?",
+    "answerable": false
+  },
+  {
+    "query": "What was the exact p-value for the sleep association?",
+    "answerable": false
+  }
+]

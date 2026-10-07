@@ -1,0 +1,4 @@
+Machine learning models learn patterns from data.
+Retrieval systems search for information relevant to a query.
+Language models generate text based on the context they receive.
+RAG combines retrieval with generation so a model can answer using external sources.

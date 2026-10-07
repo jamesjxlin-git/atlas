@@ -1,162 +1,361 @@
-# Atlas
+# Atlas — Discover, understand, and verify research
 
-Atlas is an evaluation-driven AI research assistant designed to retrieve, rank, summarize, and eventually synthesize evidence from source documents, with the broader goal of understanding how individual system-design and model choices affect retrieval, summarization, and eventually answer quality rather than beginning with a high-level RAG framework and treating each component as a black box.
+Atlas is an evaluation-driven research assistant I am building for people who already know their field, but cannot realistically keep up with everything changing inside it.
 
-Atlas currently implements sentence-aware document chunking, dense vector retrieval, cross-encoder reranking, retrieval evaluation, research-paper section parsing, and transformer-based summarization, while the summarization layer includes both an embedding-based extractive baseline and a pretrained abstractive transformer baseline implemented with PyTorch and Hugging Face Transformers.
+The idea came from something I kept seeing while working in healthcare consulting. I spent time around physicians and other senior professionals who had spent years becoming experts in their areas, yet the research landscape was moving too quickly for any one person to continuously read, compare, and validate everything that might matter.
 
-Future stages will expand the evaluation framework, test the system on real research papers and larger corpora, measure factual consistency, introduce grounded generation and citations, and eventually explore model adaptation and multi-step research capabilities.
+The problem was rarely whether they *could* understand a paper. The harder problem was deciding what deserved their attention in the first place, getting oriented to unfamiliar developments quickly, and knowing whether an AI-generated explanation actually matched what the research said.
+
+That is the gap Atlas is trying to address.
+
+Instead of treating research Q&A as one prompt to a language model, Atlas keeps the workflow explicit:
+
+```text
+research topic
+    ↓
+paper discovery
+    ↓
+transparent reading shortlist
+    ↓
+selected paper
+    ↓
+retrieval
+    ↓
+reranking
+    ↓
+evidence inspection
+    ↓
+optional cited generation
+    ↓
+evaluation
+```
+
+The broader product goal is not to replace expertise. It is to help someone with deep expertise spend less time sorting through what changed and more time applying what they already know.
 
 ---
 
 ## Why Atlas?
 
-A research assistant needs to do more than send a prompt to a language model because, before generating an answer, it needs to determine what information is relevant, retrieve appropriate evidence, distinguish strong evidence from loosely related passages, understand how a source is structured, and summarize the information in a way that remains faithful to the original material.
+There are already good tools for finding papers, and there are increasingly good tools for summarizing them.
 
-Atlas is therefore being developed as a modular system with two current foundations:
+I do not think the missing product is simply another search bar attached to an LLM.
 
-```text
-                         Atlas
-                           |
-              ---------------------------
-              |                         |
-       Evidence Retrieval        Paper Understanding
-              |                         |
-       Parsing & Chunking          Section Parsing
-              |                         |
-           Embedding                 Summarization
-              |                         |
-       Dense Retrieval            Paper Overview
-              |
-     Candidate Passages
-              |
-   Cross-Encoder Reranking
-              |
-       Ranked Evidence
-              |
-      Grounded Generation        [planned]
-              |
-          Citations              [planned]
-              |
-      Answer Evaluation          [planned]
-              |
-   Feedback / Adaptation         [future]
-```
+The problem I am more interested in is what happens when someone is already senior in a field but is dealing with an information-bandwidth problem.
 
-Each stage is intentionally kept relatively independent so that alternative approaches can be tested without rebuilding the entire system, which also makes it easier to identify whether an improvement or failure originated from chunking, retrieval, reranking, summarization, or generation.
+A physician may understand a therapeutic area extremely well and still need to get up to speed on a new technique. A researcher may enter an adjacent topic and have no obvious reason to know which five papers out of hundreds are the best place to begin. A technical leader may need to understand a new area quickly enough to make a decision without pretending that a fluent summary is equivalent to reading the evidence.
+
+In those situations, Atlas is trying to answer two separate questions:
+
+**What should I read?**
+
+and then:
+
+**What does the evidence actually say?**
+
+That distinction drives most of the product and engineering decisions in the project.
+
+Atlas does not treat citation count as truth, does not assume a prestigious affiliation makes a paper correct, and does not treat a retrieved quote as proof that a generated claim is semantically supported.
+
+Where the system cannot establish something, I would rather make that uncertainty visible than smooth it over.
 
 ---
 
-# Current Architecture
+# Current capabilities
 
-## 1. Document Chunking
+Atlas currently supports three connected workflows:
 
-Documents must be divided into smaller units before they can be embedded and retrieved, and Atlas initially used fixed-size character chunks with overlap because that approach is simple, deterministic, inexpensive, and easy to evaluate.
+1. **Discover** — find and compare scholarly papers using public metadata.
+2. **Read & ask** — upload a paper, retrieve evidence, inspect passages, and optionally generate a cited answer.
+3. **Evaluate** — manually grade retrieval quality and calculate ranking metrics.
 
-```text
-Document
-   ↓
-Characters 0–100
-Characters 80–180
-Characters 160–260
-...
-```
-
-However, character boundaries have no understanding of language, which meant words and sentences could be split between chunks and produce evidence such as:
-
-```text
-"nformation relevant to a query..."
-```
-
-or:
-
-```text
-"ing external sources."
-```
-
-### Current approach: sentence-aware chunking
-
-Atlas now identifies sentence boundaries and groups complete sentences together until adding another sentence would exceed the target chunk size.
-
-```text
-Document
-    ↓
-Sentence 1
-Sentence 2
-Sentence 3
-...
-    ↓
-Group sentences within target size
-    ↓
-Semantic chunks
-```
-
-This approach produces more coherent evidence while still remaining lightweight, and the implementation also preserves source information along with starting and ending character positions so that the same metadata can later support source attribution and citations.
-
-### Alternatives considered
-
-**Character-based chunking**
-
-Advantages:
-
-- simple
-- fast
-- deterministic
-- easy to overlap
-
-Disadvantages:
-
-- can split words and sentences
-- chunk boundaries do not correspond to semantic boundaries
-
-**Word-based chunking**
-
-Advantages:
-
-- avoids splitting individual words
-- remains simple
-
-Disadvantages:
-
-- can still split sentences and ideas
-- word count does not correspond directly to model token count
-
-**Token-based chunking**
-
-Advantages:
-
-- aligns chunk size with model context limits
-- useful when managing embedding or generation token budgets
-
-Disadvantages:
-
-- token boundaries still do not necessarily represent semantic boundaries
-- requires tokenizer-specific logic
-
-**Sentence-aware chunking — current choice**
-
-Advantages:
-
-- preserves natural language boundaries
-- produces more coherent evidence
-- remains relatively lightweight
-
-Disadvantages:
-
-- sentence lengths vary
-- simple regular-expression sentence detection can mishandle abbreviations and unusual punctuation
-- does not guarantee optimal semantic boundaries
-
-**Semantic chunking — possible future experiment**
-
-A more advanced approach could use embeddings or topic changes to identify when the meaning of a document shifts, but because this introduces additional computation and complexity, Atlas will only adopt it if later evaluation shows that the improvement justifies the added cost.
+These pieces are intentionally modular so that changes to one layer can be evaluated without rebuilding the entire system.
 
 ---
 
-## Chunking Experiment
+# 1. Research discovery
 
-The first Atlas experiment compared fixed-size character chunking against sentence-aware chunking while keeping the embedding model, queries, and retrieval procedure constant so that chunking strategy remained the primary changed variable.
+Atlas searches scholarly metadata through OpenAlex with a Crossref fallback.
 
-Sentence-aware chunking increased query-passage similarity for all six initial evaluation queries, with examples of top-result similarity changes including:
+A user can:
+
+- enter a research topic,
+- request a balanced, foundational, or recent reading list,
+- filter by publication year,
+- filter for open-access availability,
+- inspect citation counts,
+- view citing-paper examples when available,
+- inspect author affiliations,
+- see publication context,
+- check for known editorial updates,
+- open source records,
+- export the reading list,
+- and export RIS citations.
+
+The goal is not to produce an exhaustive systematic review.
+
+It is to give the user a short, defensible starting point and make the reasons behind that shortlist inspectable.
+
+---
+
+## How paper discovery works
+
+OpenAlex supplies the initial topic-search pool, normally 30 records.
+
+Atlas then:
+
+1. normalizes DOI identifiers,
+2. removes duplicate records,
+3. removes ineligible work types,
+4. ranks titles and available abstracts with the cross-encoder,
+5. selects a bounded candidate pool,
+6. checks leading candidates for editorial updates through Crossref,
+7. and applies an inspectable recommendation heuristic.
+
+The editorial-check pool is normally:
+
+```text
+top 12 candidates
+```
+
+or twice the requested recommendation count if that is larger.
+
+The final reading list is normally:
+
+```text
+3–5 recommended papers
+```
+
+depending on the requested count.
+
+---
+
+## Recommendation preferences
+
+Atlas currently supports three recommendation modes:
+
+```text
+Balanced
+Foundational
+Recent
+```
+
+The current weights are:
+
+| Preference | Relevance | Citation uptake | Recency |
+| --- | ---: | ---: | ---: |
+| Balanced | 0.80 | 0.10 | 0.10 |
+| Foundational | 0.80 | 0.20 | 0.00 |
+| Recent | 0.80 | 0.00 | 0.20 |
+
+Relevance is based on the paper's position in the cross-encoder-ranked candidate pool.
+
+The current relevance term is:
+
+```text
+1 / sqrt(rank)
+```
+
+Recency is:
+
+```text
+1 / (1 + age / 3)
+```
+
+Citation uptake uses the recorded citation percentile where available and otherwise falls back to a capped logarithmic citation-count heuristic.
+
+Missing age or uptake information receives a neutral fallback value rather than being converted into a fabricated zero.
+
+These weights are transparent product defaults.
+
+They are not empirically optimized probabilities that a paper is "credible."
+
+---
+
+## What a recommendation reason means
+
+Atlas attempts to show three factual reasons for each recommended paper when the metadata supports them.
+
+Possible signals include:
+
+- topical relevance,
+- publication context,
+- scholarly citation uptake,
+- citing-paper examples,
+- traceable author affiliations,
+- publication recency,
+- DOI traceability,
+- and editorial-update status.
+
+These are **selection signals**, not guarantees of scientific correctness.
+
+A paper can be highly cited and still be wrong.
+
+A citing paper can criticize the paper it cites.
+
+An affiliation provides provenance but does not prove rigor.
+
+A journal record does not prove reproducibility.
+
+When Atlas cannot support a positive recommendation reason from available metadata, it exposes the gap instead of inventing a reason.
+
+---
+
+# 2. Editorial and integrity checks
+
+When a DOI is available, Atlas checks Crossref for incoming editorial updates associated with the original work.
+
+Known:
+
+- retractions,
+- and expressions of concern
+
+are excluded from recommendations.
+
+Corrections remain visible so that the user can inspect them.
+
+Atlas distinguishes between:
+
+```text
+known editorial concern
+correction found
+no matching notice found
+missing DOI
+incomplete check
+failed check
+```
+
+That distinction matters.
+
+A successful query that returns no notice means only:
+
+> no matching notice was found in the metadata returned at that time
+
+It does **not** mean that the paper is verified, correct, reproducible, or free of problems.
+
+Atlas does not use Crossref as a "credibility oracle."
+
+---
+
+# 3. Selecting and uploading a paper
+
+Discovery and paper reading are deliberately connected through a manual handoff.
+
+Atlas does not bypass paywalls or scrape arbitrary PDF URLs.
+
+The user:
+
+1. selects a recommended paper,
+2. opens a publication or available copy,
+3. uploads the corresponding file,
+4. and can explicitly confirm that the upload matches the selected recommendation.
+
+Supported upload types:
+
+```text
+PDF
+TXT
+Markdown
+```
+
+Current limits:
+
+```text
+25 MB
+200 PDF pages
+2,000,000 extracted characters
+```
+
+Scanned PDFs that contain no extractable text require OCR, which Atlas does not currently include.
+
+---
+
+## Document identity
+
+The filename alone is not treated as proof that an uploaded file is the recommended paper.
+
+Atlas retains a SHA-256 fingerprint of the upload in the reading-session metadata.
+
+The recommendation-to-upload relationship remains unverified until the user confirms it.
+
+This is a small product decision, but it prevents the system from silently claiming provenance it does not actually know.
+
+---
+
+# 4. PDF and text ingestion
+
+For PDFs, Atlas extracts text page by page.
+
+Source identifiers preserve the physical PDF page:
+
+```text
+paper.pdf#page=1
+paper.pdf#page=2
+paper.pdf#page=3
+...
+```
+
+Each chunk also retains:
+
+```text
+source
+start character offset
+end character offset
+original text
+```
+
+These offsets are relative to the extracted text.
+
+They are not visual coordinates on the PDF page.
+
+Complex layouts, multi-column documents, equations, tables, and extraction artifacts can therefore still require human inspection.
+
+---
+
+# 5. Chunking
+
+Chunking has gone through several iterations during the project.
+
+That evolution matters because one of the goals of Atlas is to understand *why* a system works, not just to keep layering components until the output looks good.
+
+---
+
+## Original baseline: fixed character windows
+
+The first version used fixed-size character chunks with overlap.
+
+Conceptually:
+
+```text
+characters 0–100
+characters 80–180
+characters 160–260
+...
+```
+
+This was useful as a baseline because it was:
+
+- simple,
+- deterministic,
+- fast,
+- and easy to measure.
+
+The limitation was obvious.
+
+Character boundaries know nothing about language.
+
+A chunk could begin or end in the middle of a word or sentence.
+
+---
+
+## Early sentence-grouping experiment
+
+The next version grouped detected sentences together until a character budget would be exceeded.
+
+This produced more coherent evidence than the original fixed-character baseline and helped motivate the move toward language-aware boundaries.
+
+The early six-query experiment showed stronger query-passage similarity under the sentence-grouping approach while Hit@1 and Hit@3 remained saturated.
+
+Example similarity changes included:
 
 ```text
 0.587 → 0.729
@@ -165,939 +364,1325 @@ Sentence-aware chunking increased query-passage similarity for all six initial e
 0.676 → 0.848
 ```
 
-Retrieval accuracy remained:
+At the time:
 
-| Metric | Character Chunking | Sentence-Aware Chunking |
-|---|---:|---:|
+| Metric | Character baseline | Sentence grouping |
+| --- | ---: | ---: |
 | Hit@1 | 1.00 | 1.00 |
 | Hit@3 | 1.00 | 1.00 |
 
-This does **not** establish that sentence-aware chunking improves retrieval accuracy because the initial six-query benchmark is small and the character baseline already retrieves the expected evidence for every query; however, the experiment did show that sentence-aware chunks produced cleaner evidence boundaries and stronger query-passage similarity on this initial test.
+That experiment did **not** establish improved retrieval accuracy because the tiny benchmark was already saturated.
 
-Because the initial benchmark is already saturated, the next retrieval evaluation stage will require a larger corpus with more difficult queries and distractor passages before any stronger claim can be made.
+It did show that boundary choices changed the quality of the passages being retrieved.
 
 ---
 
-## 2. Dense Retrieval
+## Current implementation: token-bounded chunking with sentence-end preference
 
-Atlas currently uses:
+The current production path is more precise than the early character-based implementation.
+
+Atlas uses the embedding model's fast tokenizer and creates chunks capped at:
+
+```text
+180 embedding tokens
+```
+
+with:
+
+```text
+32-token overlap
+```
+
+The chunker looks for a nearby sentence ending in the latter portion of the available token window.
+
+If an appropriate sentence ending is available, Atlas prefers that location rather than cutting exactly at the maximum token count.
+
+This helps chunks **end** more naturally.
+
+However, the overlap itself is still token-based.
+
+The next chunk begins by backing up 32 tokens from the previous endpoint.
+
+That means the next passage can still begin:
+
+- inside a sentence,
+- in the middle of a clause,
+- or occasionally in visually awkward text produced by PDF extraction.
+
+The first real-paper evaluation made this limitation much more obvious.
+
+Several highly relevant retrieved passages were technically correct but began halfway through a sentence or contained more surrounding information than I would want a user to read.
+
+For that reason, I no longer describe the current implementation as fully "sentence-aware chunking."
+
+A more accurate description is:
+
+> **token-bounded chunking with sentence-end preference**
+
+---
+
+## Planned chunking improvement
+
+The next chunking iteration should build chunks from complete sentence units first.
+
+Rather than backing up an arbitrary token count, overlap would carry one or more **whole preceding sentences** into the next chunk.
+
+A future version should roughly follow:
+
+```text
+extract text
+    ↓
+normalize PDF line breaks / hyphenation
+    ↓
+detect sentence units
+    ↓
+group complete sentences within token budget
+    ↓
+carry complete previous sentence(s) for overlap
+    ↓
+fallback to token splitting only for unusually long sentences
+```
+
+The goal is not just prettier text.
+
+A research assistant should return evidence that a person can comfortably inspect.
+
+Retrieval relevance and passage readability both matter.
+
+The existing synthetic and real-paper benchmarks make this change measurable: the revised chunker can be compared against the current implementation rather than accepted because it "looks better."
+
+---
+
+# 6. Dense retrieval
+
+Atlas uses:
 
 ```text
 sentence-transformers/all-MiniLM-L6-v2
 ```
 
-to independently encode document chunks and user queries into dense vectors.
+to encode document chunks and user queries.
 
-For a collection of document chunks:
+Document chunks are embedded once when a paper is loaded.
 
-```text
-Chunk 1 ──→ embedding
-Chunk 2 ──→ embedding
-Chunk 3 ──→ embedding
-...
-```
+The embeddings are normalized and stored as float32 vectors in the session-owned local index.
 
-These embeddings can be computed once and reused, while each incoming query is embedded separately and compared against the stored chunk representations.
+At query time:
 
 ```text
-Query ──→ embedding
-             ↓
-Compare with stored chunk embeddings
-             ↓
-Rank by similarity
+question
+    ↓
+query embedding
+    ↓
+cosine similarity against chunk matrix
+    ↓
+rank candidates
 ```
 
-The embeddings are normalized, which allows vector dot products to be used as cosine-similarity scores.
+Because embeddings are normalized, a dot product can be used as cosine similarity.
 
-### Why dense retrieval?
+The default candidate pool is:
 
-Dense retrieval is useful because it can identify passages that are semantically related even when the query and passage do not contain exactly the same words, while separating document indexing from query-time retrieval also makes it possible to precompute document embeddings instead of repeatedly encoding the same source material.
-
-### Alternative: keyword retrieval
-
-A traditional lexical retrieval system such as BM25 could instead rank documents based largely on matching terms, which can be particularly effective when exact terminology matters and does not require neural embeddings.
-
-Atlas currently uses dense retrieval because semantic matching is important for natural-language research questions; however, BM25 or a hybrid dense + lexical retrieval system remains a potential future experiment rather than something being ruled out.
+```text
+top 20 chunks
+```
 
 ---
 
-## 3. Cross-Encoder Reranking
+## Why dense retrieval?
 
-Dense retrieval is efficient, but because the query and passage are encoded separately, the embedding model never directly examines their relationship as a pair.
+Dense retrieval can identify semantically related evidence even when the question and the passage do not use exactly the same vocabulary.
+
+It also allows document embeddings to be computed once and reused for many questions.
+
+This is especially useful for the current product, where a user may ask several questions against the same uploaded paper.
+
+---
+
+## Why not BM25 only?
+
+A lexical system such as BM25 can be extremely effective when exact terminology matters.
+
+Atlas currently uses dense retrieval because natural-language research questions often paraphrase the source.
+
+That does not mean lexical retrieval is ruled out.
+
+A future experiment could compare:
 
 ```text
-Query ─────→ vector
-                 \
-                  similarity
-                 /
-Passage ───→ vector
+dense only
+BM25 only
+hybrid dense + lexical
 ```
 
-Atlas therefore adds a second retrieval stage using:
+using the same human-reviewed benchmark.
+
+---
+
+# 7. Cross-encoder reranking
+
+Dense retrieval is efficient, but the query and passage are encoded separately.
+
+The embedding model never jointly reads:
+
+```text
+(question, passage)
+```
+
+Atlas therefore performs a second ranking stage using:
 
 ```text
 cross-encoder/ms-marco-MiniLM-L6-v2
 ```
 
-The cross-encoder receives:
+The cross-encoder scores the query and candidate passage together.
+
+The retrieval path becomes:
 
 ```text
-(query, candidate passage)
+all paper chunks
+      ↓
+dense similarity search
+      ↓
+top 20 candidates
+      ↓
+cross-encoder scoring
+      ↓
+reranked evidence
 ```
-
-together and produces a new relevance score, which means it can evaluate the relationship between the query and candidate passage more directly than the dense retriever.
-
-The resulting architecture is:
-
-```text
-Full document collection
-          ↓
-     Dense retrieval
-          ↓
-  Broad candidate set
-          ↓
- Cross-encoder reranking
-          ↓
- Highest-ranked evidence
-```
-
-### Why not use the cross-encoder for everything?
-
-Cross-encoders can make more detailed query-passage comparisons, but they are substantially more expensive at query time because they must evaluate every query-passage pair individually.
-
-With 100,000 chunks, dense retrieval can compare a query vector against precomputed document vectors, whereas using only a cross-encoder would require evaluating approximately:
-
-```text
-(query, chunk 1)
-(query, chunk 2)
-...
-(query, chunk 100,000)
-```
-
-for every new query.
-
-Atlas therefore uses the dense retriever for candidate generation and reserves the more expensive cross-encoder for evaluating only the strongest candidates.
 
 ---
 
-## Initial Reranking Experiment
+## Why not use the cross-encoder against every chunk?
 
-The current benchmark compares the original dense ranking against the cross-encoder ranking.
+Cross-encoders are more expensive at query time.
 
-For example:
+With a very large corpus, evaluating every `(query, chunk)` pair would be inefficient.
 
-```text
-Question:
-"What do machine learning models learn?"
+Dense retrieval provides inexpensive candidate generation.
 
-Dense retrieval:
+The cross-encoder then spends more computation only on those leading candidates.
 
-0.729   Machine learning models learn patterns from data.
-0.390   Language models generate text based on context.
-0.302   RAG combines retrieval with generation.
-
-Cross-encoder reranking:
-
- 8.969  Machine learning models learn patterns from data.
--7.355  Language models generate text based on context.
--10.038 RAG combines retrieval with generation.
-```
-
-The two types of scores should not be compared numerically because dense scores represent similarity between normalized embedding vectors, whereas cross-encoder outputs are separate relevance scores used to rank candidate passages and are not probabilities.
-
-The initial evaluation currently produces:
-
-| Metric | Dense Retrieval | After Reranking |
-|---|---:|---:|
-| Hit@1 | 1.00 | 1.00 |
-| Hit@3 | 1.00 | 1.00 |
-
-Reranking therefore has **not yet demonstrated an improvement in Hit@k**, but this result is largely a consequence of the initial benchmark already being saturated, which makes further improvement mathematically impossible on these metrics.
-
-The next evaluation stage will therefore use more documents, distractor passages, and more difficult queries so that Atlas can measure when reranking actually improves retrieval rather than assuming that the additional model necessarily produces a better result.
+This is a common two-stage ranking pattern and maps well to Atlas's current one-paper workflow.
 
 ---
 
-## 4. Retrieval Evaluation
+# 8. Evidence packing
 
-Atlas keeps evaluation separate from retrieval so that changes to the retrieval pipeline can be measured against the same expected results.
+After reranking, Atlas builds an evidence context from the strongest original passages.
 
-Evaluation cases are stored in JSON and currently contain:
+The current limits are:
 
-```json
-{
-    "query": "What does RAG combine?",
-    "expected": "RAG combines retrieval with generation"
-}
+```text
+up to 4 distinct passages
+3,500-token evidence JSON budget
 ```
 
-The current metrics are:
+Evidence packing retains application-owned source metadata.
 
-### Hit@1
+Generated summaries are never treated as retrievable evidence.
 
-Was the expected evidence the first retrieved result?
+Every new question returns to the original uploaded paper text.
 
-### Hit@3
-
-Was the expected evidence anywhere within the first three results?
-
-This creates a simple initial retrieval benchmark, although expected evidence is currently identified using text matching, which is intentionally straightforward but can become brittle because a relevant passage may contain the correct information without containing the exact expected text.
-
-Potential future evaluation approaches therefore include:
-
-- document or chunk IDs as ground truth
-- Recall@k
-- Mean Reciprocal Rank (MRR)
-- manually labeled relevance judgments
-- semantic answer evaluation
-- LLM-assisted evaluation with human validation
-
-The evaluation methodology will become more sophisticated as the corpus becomes more realistic.
+This prevents one generated answer from quietly becoming evidence for another answer.
 
 ---
 
-# Research Paper Understanding
+# 9. Evidence preview
 
-Atlas now includes an initial research-paper understanding pipeline in addition to retrieval because a user may not know what specific questions to ask before they have at least a basic understanding of the paper.
+One design choice I care about is that Atlas does not require an LLM to determine whether retrieval worked.
 
-The current pipeline begins with already-extracted research-paper text:
+The user can choose:
 
 ```text
-Research Paper Text
-        ↓
-Section Detection
-        ↓
-Structured Paper Sections
-        ↓
-Section-Level Summarization
-        ↓
-Structured Paper Overview
+Preview source evidence
 ```
 
-PDF extraction is not yet part of the current pipeline, but once it is added, the same structured representation can be passed into the existing summarization system.
+and inspect the retrieved passages directly.
+
+This makes the retrieval system independently testable.
+
+If Atlas never retrieved the correct evidence, a fluent generation model should not be allowed to hide that failure.
+
+Retrieval quality and generation quality are therefore evaluated separately.
 
 ---
 
-## 5. Research-Paper Section Parsing
+# 10. Optional structured generation
 
-Research papers are not treated as one undifferentiated block of text because different sections serve different purposes, and separating them allows later components to reason about Methods, Results, Discussion, and other sections independently.
+Atlas contains an optional evidence-grounded generation layer.
 
-Atlas currently identifies major sections such as:
+The default configured model is:
 
 ```text
-Abstract
-Introduction
-Methods
-Results
-Discussion
+gpt-4.1-mini-2025-04-14
+```
+
+A generation request contains:
+
+- the user's question,
+- selected evidence passages,
+- source identifiers,
+- and the structured response schema.
+
+The generator is not given arbitrary hidden conversational context from previous questions.
+
+Questions are independent.
+
+The current generator allows:
+
+```text
+up to 6 claims
+up to 1,600 output tokens
+```
+
+The generation model is configurable through:
+
+```text
+ATLAS_GENERATION_MODEL
+```
+
+provided the selected model supports the required structured-output interface and tokenizer assumptions.
+
+---
+
+## Generation is optional
+
+The following workflows do **not** require an OpenAI API key:
+
+- scholarly discovery,
+- paper ingestion,
+- dense retrieval,
+- cross-encoder reranking,
+- evidence preview,
+- retrieval evaluation,
+- synthetic benchmarks.
+
+An OpenAI API key is only required for:
+
+- generated cited answers,
+- generated paper overviews.
+
+API usage has separate billing.
+
+---
+
+# 11. Evidence and citation validation
+
+Atlas validates the structure of generated evidence before showing a generated answer.
+
+A generated claim must reference a valid retrieved passage identifier.
+
+A quoted piece of evidence must appear in the corresponding original passage, allowing whitespace normalization.
+
+Citation metadata is rendered from application-owned source information rather than text invented by the model.
+
+Atlas can therefore catch failures such as:
+
+```text
+unknown passage ID
+invented supporting quote
+malformed evidence structure
+incomplete structured response
+```
+
+Those failures are not silently converted into a normal answer.
+
+---
+
+## Generation states
+
+Atlas currently distinguishes:
+
+```text
+answered
+insufficient_evidence
+invalid_evidence
+refused
+```
+
+Transport failures and incomplete API responses raise a separate generation error.
+
+This avoids mislabeling an API failure as "the paper does not contain enough evidence."
+
+---
+
+# 12. The most important generation limitation
+
+One of the most useful failures I found while building Atlas was that:
+
+> **citation integrity is not the same thing as semantic entailment**
+
+Atlas can verify that:
+
+- the passage exists,
+- the citation ID is valid,
+- and the quote actually appears in that passage.
+
+That still does not prove that the quote logically supports the generated claim.
+
+I added an adversarial automated test that demonstrates this.
+
+A genuine quote can be attached to a contradictory claim and still pass quote-presence validation.
+
+Because of that, Atlas is **not** described as "hallucination-free."
+
+The current validation establishes source and quote integrity.
+
+Semantic support remains a separate evaluation problem.
+
+Future work should measure entailment explicitly rather than pretending that citation presence solves it.
+
+---
+
+# 13. Paper overview
+
+Atlas can optionally generate four targeted overview sections:
+
+```text
+Research question
+Approach
+Main findings
 Limitations
-Conclusion
 ```
 
-Different papers may use different headings for similar concepts, so Atlas standardizes common variations.
+Each section performs its own evidence retrieval and generation step.
+
+The overview is therefore an evidence-selected summary rather than an exhaustive summary of every page.
+
+Generated overview text is not fed back into the retrieval index.
+
+---
+
+# 14. Human-readable retrieval evaluation
+
+A similarity score is useful to a model developer.
+
+It is not always useful to the person reading the evidence.
+
+Atlas therefore adds a human-reviewed relevance layer.
+
+Each retrieved passage can be labeled:
+
+| Grade | Label | Meaning |
+| ---: | --- | --- |
+| 3 | **Perfect** | Direct evidence sufficient for the requested answer |
+| 2 | **Close** | Useful evidence with an important gap or missing qualification |
+| 1 | **Decent** | Related background that does not directly answer the question |
+| 0 | **Bad** | Irrelevant, wrong-scope, or misleading evidence |
+
+These labels apply to one passage for one specific question.
+
+They do **not** represent the credibility of the paper itself.
+
+---
+
+## Human review, not score thresholds
+
+The labels are assigned manually.
+
+Atlas does not map raw cosine or cross-encoder scores directly into Perfect / Close / Decent / Bad.
+
+The intended workflow is:
+
+```text
+Atlas retrieves
+      ↓
+human reviews
+      ↓
+evaluation code calculates metrics
+```
+
+Unreviewed evidence remains:
+
+```text
+Unjudged
+```
+
+rather than being treated as Bad.
+
+---
+
+# 15. Retrieval metrics
+
+Atlas reports several ranking metrics.
+
+## Hit@1
+
+Did the first-ranked passage contain Perfect evidence?
+
+## Hit@3
+
+Did any of the top three passages contain Perfect evidence?
+
+## Useful Hit@3
+
+Did the top three contain at least Close evidence?
+
+## Mean Reciprocal Rank
+
+MRR rewards systems that place the first Perfect passage earlier.
+
+```text
+Perfect at rank 1 → 1.0
+Perfect at rank 2 → 0.5
+Perfect at rank 3 → 0.333...
+```
+
+## NDCG@3
+
+NDCG uses the complete graded relevance ordering rather than reducing every passage to relevant / irrelevant.
+
+The gain function is:
+
+```text
+2^grade - 1
+```
+
+with logarithmic rank discount.
 
 For example:
 
 ```text
-Methods
-Methodology
-Materials and Methods
-Experimental Methods
+[Close, Perfect, Decent]
 ```
 
-are all treated internally as:
+has:
 
 ```text
-methods
+Hit@1 = 0
+Hit@3 = 1
 ```
 
-Similarly:
-
-```text
-Conclusion
-Conclusions
-```
-
-are treated as the same section.
-
-Section numbering is removed before matching, which means headings such as:
-
-```text
-2. Methods
-3.1 Results
-```
-
-can still be recognized as:
-
-```text
-methods
-results
-```
-
-The parser reads the paper line by line, identifies recognized headings, and assigns the following text to the appropriate standardized section, while parsing stops when the References or Bibliography section is reached because reference entries should not be treated as research-paper content for summarization.
-
-The resulting representation resembles:
-
-```python
-{
-    "abstract": "...",
-    "introduction": "...",
-    "methods": "...",
-    "results": "...",
-    "discussion": "...",
-    "conclusion": "..."
-}
-```
-
-This structure will later allow Atlas to treat sections differently depending on the user's question; for example, Methods can support methodology explanations while Results can contribute more heavily to identifying a paper's primary findings.
+while NDCG also reflects the ordering of all three judgments.
 
 ---
 
-# 6. Summarization
+# 16. Label scope
 
-Atlas currently implements two summarization approaches because keeping a simple baseline alongside a more complex model makes it possible to evaluate whether additional model complexity actually improves the result.
+Atlas distinguishes between:
 
-The first approach is an embedding-based extractive baseline, while the second is a pretrained transformer-based abstractive baseline.
+```text
+judged_pool
+complete_corpus
+```
+
+A `complete_corpus` declaration is accepted only when every current chunk has a label.
+
+A `judged_pool` NDCG score is conditional on the reviewed pool.
+
+Chunk identifiers include the source, offsets, and original text.
+
+Changing chunking or source identity invalidates old labels.
+
+This prevents reviewed judgments from silently being applied to different passages.
 
 ---
 
-## Extractive Summarization Baseline
+# 17. Validation strategy
 
-The extractive approach does not generate new language; instead, it identifies existing sentences that are most representative of the overall section.
+I did not want the first published paper I uploaded to also be the first time Atlas's evaluation logic was tested.
 
-The pipeline is:
-
-```text
-Section
-   ↓
-Split into sentences
-   ↓
-Generate sentence embeddings
-   ↓
-Average sentence embeddings
-   ↓
-Approximate section-level semantic center
-   ↓
-Cosine similarity
-   ↓
-Select highest-scoring sentences
-```
-
-Suppose a section contains six sentences and the embedding model produces a tensor shaped approximately:
+The project therefore moved through several layers:
 
 ```text
-[6, 384]
+simple synthetic examples
+      ↓
+controlled graded synthetic benchmark
+      ↓
+live scholarly metadata
+      ↓
+human-reviewed published-paper pilot
 ```
 
-where:
+Each layer answers a different question.
 
-```text
-6   = number of sentences
-384 = embedding dimensions
-```
+Synthetic data provides controlled edge cases.
 
-Averaging across the sentence dimension produces:
+Live metadata tests the discovery path against real APIs.
 
-```text
-[384]
-```
-
-which acts as an approximate semantic center for the section, while cosine similarity is then used to compare each sentence against that center and identify the most representative ones.
-
-The selected sentences are returned in their original reading order because ranking them by similarity should not unnecessarily change the logical order of the source material.
-
-### Why keep an extractive baseline?
-
-Extractive summarization has an important advantage because the summary consists entirely of source text, which greatly reduces the possibility of inventing unsupported claims; however, it does not truly synthesize information.
-
-For example, an extractive result may resemble:
-
-```text
-Students reported their average nightly sleep duration.
-
-Students sleeping seven to nine hours had higher average exam scores.
-
-Students sleeping fewer than five hours had the lowest average scores.
-```
-
-A more useful human-facing summary would ideally combine these ideas into a shorter explanation rather than simply selecting the original sentences, which is why the extractive method is currently treated as a baseline rather than the final user-facing approach.
+The published-paper pilot tests the retrieval system on authentic research language.
 
 ---
 
-## Transformer-Based Abstractive Summarization
+# 18. Automated test suite
 
-Atlas also uses:
-
-```text
-sshleifer/distilbart-cnn-12-6
-```
-
-as its initial pretrained abstractive summarization baseline.
-
-Unlike the extractive method, the transformer can generate new text by converting the source into token IDs, processing those numerical representations through a pretrained sequence-to-sequence transformer, and then decoding the generated token sequence back into readable text.
+The current project passes:
 
 ```text
-Source Text
-    ↓
-Tokenizer
-    ↓
-Token IDs
-    ↓
-Pretrained Transformer
-    ↓
-Generated Token Sequence
-    ↓
-Decoded Summary
+68 / 68 automated tests
 ```
 
-### Short sections
-
-Very short sections are not forced through generative summarization because, when the source is already concise, asking the model to rewrite it creates additional opportunity for distortion without providing meaningful compression.
-
-Atlas therefore preserves sufficiently short sections rather than generating a replacement unnecessarily.
-
-### Long sections
-
-Research-paper sections can exceed a model's practical input size, so Atlas uses token-aware hierarchical summarization rather than truncating everything beyond the model limit.
+Latest local run:
 
 ```text
-Long Section
-     ↓
-Split into sentence-aware, token-limited chunks
-     ↓
-Summarize each chunk
-     ↓
-Combine chunk summaries
-     ↓
-Summarize combined information
-     ↓
-Final section summary
+68 passed in 3.74s
 ```
 
-Sentence boundaries are preserved whenever possible; however, if a single sentence exceeds the model's safe input size, Atlas can fall back to token-level splitting so that the text can still be processed.
+The exact runtime can vary because of local caching and operating-system conditions.
 
-If the combined first-stage summaries remain too large, Atlas can apply another level of summarization before producing the final result, which allows the same pipeline to scale to substantially longer sections.
+The important result is that all 68 tests pass.
+
+The suite covers chunking, token budgets, source offsets, embedding behavior, dense retrieval, reranking, evidence packing, structured response parsing, citation and quote validation, refusal and insufficiency behavior, scholarly metadata normalization, editorial notices, API fallbacks, relevance grading, ranking metrics, and Streamlit workflows.
+
+Tests use deterministic stubs where appropriate and make no paid generation requests.
+
+They verify implementation behavior, not the quality of every real-model answer.
 
 ---
 
-## PyTorch in the Current Pipeline
+# 19. Controlled synthetic retrieval benchmark
 
-PyTorch is currently used directly for tensor operations and model inference, although Atlas has not yet reached the stage where model weights are trained or fine-tuned.
+Atlas includes synthetic fixtures for:
 
-The extractive summarization pipeline uses operations such as:
+- basic retrieval,
+- answerable questions,
+- unanswerable questions,
+- distractor passages,
+- RAG behavior,
+- relevance grading,
+- citation behavior,
+- and failure cases.
 
-```python
-embeddings.mean(dim=0)
-```
-
-to calculate the average section embedding,
-
-```python
-torch.nn.functional.cosine_similarity(...)
-```
-
-to compare sentence embeddings against that section representation, and:
-
-```python
-torch.topk(...)
-```
-
-to identify the highest-ranked sentences.
-
-The transformer summarization pipeline also runs a PyTorch BART model, while:
-
-```python
-with torch.no_grad():
-```
-
-disables gradient calculation because the current stage uses pretrained weights for inference rather than modifying them through training.
-
-The current project therefore includes:
+The fully graded retrieval fixture contains:
 
 ```text
-PyTorch tensor operations          ✓
-Embedding manipulation             ✓
-Similarity computation             ✓
-Pretrained transformer inference   ✓
-
-Backpropagation                    not yet
-Optimizer-based weight updates     not yet
-Model training                     not yet
-Fine-tuning                        not yet
+5 synthetic documents
+4 labeled questions
+3 answerable questions
+1 intentionally unanswerable question
 ```
 
-Training and model adaptation remain later stages of Atlas, but the current implementation establishes the tensor, embedding, and transformer-inference foundation needed before those concepts are introduced.
+The corpus was indexed and searched using the real MiniLM embedding and cross-encoder models.
+
+## Synthetic results
+
+| Metric | Dense retrieval | Reranked |
+| --- | ---: | ---: |
+| Hit@1 — Perfect evidence | 0.667 | 0.667 |
+| Hit@3 — Perfect evidence | 1.000 | 1.000 |
+| MRR | 0.778 | **0.833** |
+| NDCG@3 | 0.936 | **0.953** |
+
+The reranker improved MRR and NDCG@3 while preserving a Perfect result in the top three for every answerable synthetic question.
+
+This is a controlled smoke benchmark, not a general accuracy claim.
 
 ---
 
-## Initial Summarization Finding
+# 20. Human-reviewed real-paper pilot
 
-Early testing demonstrated why generative summarization requires its own evaluation rather than being treated as automatically superior to extraction.
+After the controlled evaluation was stable, Atlas was tested against a published paper:
 
-In one controlled example, the source stated:
+> Samuelson et al. — *Exploring innovation landscapes: a national cross-sectional study of Swedish primary care from the viewpoint of primary care managers.*
 
-```text
-"We recruited 500 university students."
-```
-
-while the pretrained transformer initially introduced unsupported geographic information about those students.
-
-The generated summary was more natural than the extractive baseline; however, because it included information that was not present in the source, the experiment showed that readability and factual consistency need to be evaluated as separate properties.
-
-This motivates a central design requirement for later Atlas development:
+The pilot contained:
 
 ```text
-Readable generation
-        +
-Factual consistency
-        +
-Source grounding
+6 human-reviewed questions
+5 answerable
+1 intentionally unanswerable
+3 reviewed top passages per question
 ```
 
-The current DistilBART model is therefore treated as a **baseline rather than the final Atlas summarization model**, while later experiments will evaluate whether grounding, model adaptation, or fine-tuning can improve summary quality without increasing unsupported claims.
+Questions covered study design, respondent count, collaboration patterns, barriers to innovation, causal limitations, representativeness, selection bias, and one intentionally unsupported causal-effect question.
+
+The final question deliberately asked for a causal effect the paper could not establish.
+
+That makes answerability itself part of the evaluation.
+
+## Real-paper reranked results
+
+| Metric | Result |
+| --- | ---: |
+| Hit@1 — Perfect evidence | **0.600** |
+| Hit@3 — Perfect evidence | **1.000** |
+| Useful Hit@3 | **1.000** |
+| MRR | **0.800** |
+| NDCG@3 — judged pool | **0.938** |
+
+Across the five answerable questions:
+
+```text
+5 / 5
+```
+
+retrieved a Perfect passage somewhere in the top three.
+
+Three of five placed Perfect evidence at rank one.
+
+## Real-paper timing
+
+| Stage | Mean |
+| --- | ---: |
+| Dense retrieval | ~4.1 ms |
+| Cross-encoder reranking | ~21.5 ms |
+| Context construction | ~0.5 ms |
+| Combined retrieval → context | **~26 ms** |
+
+Paper indexing took approximately:
+
+```text
+214 ms
+```
+
+on the local development machine.
+
+These are local measurements, not production latency guarantees.
+
+## Why I do not compare dense vs. reranked metrics in this pilot
+
+Human judgments were collected for the reranked top-three passages.
+
+Many dense-only passages therefore remained Unjudged.
+
+The dense-side denominators are incomplete, so those values are not a fair head-to-head comparison.
+
+A proper comparison would require pooled judgments from both systems or complete-corpus labels.
+
+## Scope
+
+This is still a small evaluation:
+
+```text
+1 published paper
+6 questions
+5 answerable cases
+```
+
+It demonstrates that the evaluation workflow works on authentic research text.
+
+It does not establish cross-domain research accuracy.
 
 ---
 
-# Current Integrated Demo
+# 21. Live scholarly-discovery validation
 
-The current `demo.py` exercises both major parts of Atlas so that retrieval and paper understanding can be tested in the same executable workflow without combining their evaluation prematurely.
+The discovery pipeline has also been run against live public scholarly metadata.
 
-### Retrieval pipeline
-
-```text
-Sample Document
-      ↓
-Sentence-Aware Chunking
-      ↓
-Dense Embeddings
-      ↓
-Dense Retrieval
-      ↓
-Candidate Passages
-      ↓
-Cross-Encoder Reranking
-      ↓
-Hit@1 / Hit@3 Evaluation
-```
-
-### Paper-understanding pipeline
+Two topics were tested:
 
 ```text
-Sample Research Paper
-      ↓
-Section Parsing
-      ↓
-Abstract
-Introduction
-Methods
-Results
-Discussion
-Conclusion
-      ↓
-Section-Level Summarization
-      ↓
-Structured Paper Overview
+retrieval augmented generation evaluation
+urban heat island mitigation green roofs
 ```
 
-This allows Atlas to test retrieval and summarization separately while still confirming that the major components operate together correctly.
+For each topic:
+
+```text
+30 records fetched
+12 leading candidates checked for incoming editorial updates
+3 recommendations returned
+```
+
+Missing metadata or citing-paper examples were left missing rather than invented.
+
+A successful Crossref check with no matching notice means only that no matching notice was found in the returned metadata at that time.
 
 ---
 
-# Project Structure
+# 22. Validation summary
+
+| Layer | Current evidence |
+| --- | --- |
+| Automated engineering checks | **68 passing tests** |
+| Synthetic development fixtures | Retrieval, RAG, distractors, answerability, grading, evidence validation |
+| Fully graded synthetic benchmark | **5 documents / 4 questions** |
+| Synthetic reranked performance | **1.000 Hit@3 / 0.833 MRR / 0.953 NDCG@3** |
+| Live scholarly discovery | **2 topics × 30 fetched records** |
+| Published-paper pilot | **6 human-reviewed questions** |
+| Real-paper reranked performance | **1.000 Hit@3 / 0.800 MRR / 0.938 NDCG@3** |
+
+The point of this progression is to move from controlled behavior to increasingly realistic evidence while keeping the limits of each test visible.
+
+---
+
+# 23. Current architecture
+
+```text
+Research topic
+      │
+      ▼
+OpenAlex / Crossref
+      │
+      ▼
+Recommendation ranking + editorial checks
+      │
+      ▼
+User selects a paper
+      │
+      ▼
+PDF / TXT / MD
+      │
+      ▼
+Extraction + token-bounded chunking
+with sentence-end preference
+      │
+      ▼
+MiniLM dense embeddings
+      │
+      ▼
+Top 20 candidates
+      │
+      ▼
+Cross-encoder reranking
+      │
+      ▼
+Ranked original evidence
+      │
+      ├────────────► Human inspection + evaluation
+      │
+      ▼
+Optional structured generation
+      │
+      ▼
+Citation + quote validation
+      │
+      ▼
+Evidence-linked answer
+```
+
+---
+
+# 24. Why exact in-memory vector search?
+
+Atlas currently indexes one paper at a time.
+
+At that scale, a normalized in-memory embedding matrix provides exact cosine ranking, low local latency, and simple inspectable behavior without an external vector-database dependency.
+
+A vector database would make more sense for persistent multi-paper libraries, many simultaneous users, very large corpora, or distributed hosted retrieval.
+
+---
+
+# 25. Why no agent framework?
+
+The current workflow is deterministic enough that explicit modules are easier to inspect, test, evaluate, and debug.
+
+Atlas separates discovery, ingestion, chunking, retrieval, reranking, context, generation, and evaluation.
+
+If future multi-step research behavior genuinely requires dynamic planning, that can be added later.
+
+I do not want "agentic" complexity to become a feature by itself.
+
+---
+
+# 26. Why separate retrieval quality from generation quality?
+
+A poor answer can come from different failures:
+
+```text
+wrong paper selected
+retrieval missed the evidence
+reranking ordered evidence poorly
+context packing omitted the right passage
+generation misinterpreted correct evidence
+citation validation failed
+```
+
+Scoring only the final answer makes those failures difficult to diagnose.
+
+Atlas evaluates retrieval independently before generation.
+
+---
+
+# 27. Streamlit application
+
+The current web interface uses Streamlit.
+
+Main pages:
+
+```text
+Discover
+Read & ask
+Evaluate
+```
+
+The interface supports scholarly search, reading-list inspection, citation export, paper upload, evidence preview, optional generation, manual relevance grading, reviewed-label export, and retrieval evaluation.
+
+---
+
+# 28. Running Atlas
+
+Use Python 3.11 or 3.12.
+
+```bash
+git clone <YOUR-REPOSITORY-URL>
+cd Atlas
+
+python -m venv .venv
+source .venv/bin/activate
+
+python -m pip install -r requirements-dev.txt
+
+cp -n .env.example .env
+
+python -m streamlit run app.py
+```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+The first retrieval run may download the two MiniLM model weights.
+
+---
+
+# 29. Environment variables
+
+```text
+OPENAI_API_KEY=
+ATLAS_GENERATION_MODEL=gpt-4.1-mini-2025-04-14
+
+OPENALEX_API_KEY=
+CROSSREF_CONTACT_EMAIL=
+```
+
+`OPENAI_API_KEY` is optional and only needed for generation.
+
+`OPENALEX_API_KEY` is optional.
+
+`CROSSREF_CONTACT_EMAIL` is optional.
+
+Actual credentials belong in `.env`, which is excluded from Git.
+
+---
+
+# 30. CLI examples
+
+## Discover papers
+
+```bash
+python -m src.atlas.cli discover   "urban heat island mitigation"   --count 5   --preference recent   --output reports/readings.json
+```
+
+## Preview local evidence
+
+```bash
+python -m src.atlas.cli ask   "What limitations are reported?"   --documents data/examples/sleep_study.txt   --retrieve-only
+```
+
+## Generate a cited answer
+
+```bash
+python -m src.atlas.cli ask   "What limitations are reported?"   --documents data/private/paper.pdf   --output reports/answer.json
+```
+
+## Generate an overview
+
+```bash
+python -m src.atlas.cli overview   --documents data/private/paper.pdf   --output reports/overview.json
+```
+
+## Run the synthetic graded evaluation
+
+```bash
+python -m src.atlas.cli evaluate   --output reports/graded.json
+```
+
+## Evaluate human-reviewed labels
+
+```bash
+python -m src.atlas.cli evaluate   --documents data/private/paper.pdf   --cases data/evaluation/my-reviewed-cases.json   --output reports/my-paper.json
+```
+
+Generation during evaluation is opt-in with:
+
+```text
+--generate
+```
+
+---
+
+# 31. Example reviewed-evaluation workflow
+
+```text
+1. Load a paper
+2. Ask or preview one question
+3. Review the reranked top three passages
+4. Assign Perfect / Close / Decent / Bad
+5. Mark whether the paper contains enough evidence to answer
+6. Export the reviewed case
+7. Repeat
+8. Combine reviewed cases
+9. Run evaluation against the same paper/chunk configuration
+```
+
+Because chunk IDs depend on source identity, offsets, and original text, labels must be reused only with the same document and chunk configuration.
+
+---
+
+# 32. Repository structure
 
 ```text
 Atlas/
+│
+├── app.py
+├── README.md
+├── requirements.txt
+├── requirements-dev.txt
+├── pytest.ini
+├── .env.example
+├── .gitignore
+├── .streamlit/
+│   └── config.toml
+│
 ├── data/
-│   └── raw/
-│       └── eval_cases.json
+│   ├── examples/
+│   ├── graded_demo/
+│   ├── evaluation/
+│   └── private/              # ignored
+│
+├── docs/
+│   └── VALIDATION.md
 │
 ├── src/
 │   └── atlas/
 │       ├── __init__.py
 │       ├── chunking.py
-│       ├── retrieval.py
-│       ├── reranking.py
+│       ├── cli.py
+│       ├── config.py
+│       ├── context.py
+│       ├── demo.py
+│       ├── discovery.py
 │       ├── evaluation.py
-│       ├── paper.py
-│       ├── summarization.py
-│       └── demo.py
+│       ├── generation.py
+│       ├── grades.py
+│       ├── ingestion.py
+│       ├── metadata.py
+│       ├── models.py
+│       ├── overview.py
+│       ├── pipeline.py
+│       ├── reranking.py
+│       ├── retrieval.py
+│       └── scholar.py
 │
-├── .gitignore
-├── README.md
-└── requirements.txt
+└── tests/
+    ├── test_app.py
+    ├── test_chunking.py
+    ├── test_discovery.py
+    ├── test_grades.py
+    └── test_rag.py
 ```
 
-The components are intentionally separated by responsibility:
+---
+
+# 33. Module responsibilities
+
+| Layer | Main files |
+| --- | --- |
+| Streamlit interface | `app.py`, `.streamlit/config.toml` |
+| Scholarly providers | `scholar.py` |
+| Metadata normalization | `metadata.py` |
+| Recommendation logic | `discovery.py` |
+| Upload parsing | `ingestion.py` |
+| Chunk construction | `chunking.py` |
+| Dense retrieval | `retrieval.py` |
+| Cross-encoder ranking | `reranking.py` |
+| Evidence packing | `context.py` |
+| Structured generation | `generation.py` |
+| Pipeline orchestration | `pipeline.py` |
+| Paper overview | `overview.py` |
+| Graded relevance | `grades.py` |
+| Retrieval evaluation | `evaluation.py` |
+| Model loading | `models.py` |
+| Configuration | `config.py` |
+| CLI | `cli.py` |
+
+---
+
+# 34. Data handling
+
+Uploaded paper text and the local retrieval index remain associated with the active reading workflow.
+
+Private documents should remain under:
 
 ```text
-chunking.py
-    ↓
-How should documents be divided?
-
-retrieval.py
-    ↓
-Which chunks might be relevant?
-
-reranking.py
-    ↓
-Which retrieved candidates are most relevant?
-
-evaluation.py
-    ↓
-How well did retrieval perform?
-
-paper.py
-    ↓
-How should research papers be divided into meaningful sections?
-
-summarization.py
-    ↓
-How should research-paper sections be condensed and compared across summarization approaches?
-
-demo.py
-    ↓
-How do the components operate together?
+data/private/
 ```
 
-This modular structure makes it possible to change one stage while keeping the others relatively constant during experiments, which is particularly important once Atlas begins comparing different models and retrieval strategies.
+and are excluded from Git.
 
----
-
-# Running Atlas
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Run the current pipeline from the project root:
-
-```bash
-python -m src.atlas.demo
-```
-
-The current demo:
-
-1. Divides source text into sentence-aware chunks.
-2. Generates dense embeddings.
-3. Retrieves candidate evidence using vector similarity.
-4. Reranks candidates using a cross-encoder.
-5. Compares dense and reranked results.
-6. Calculates Hit@1 and Hit@3.
-7. Parses a sample research paper into standardized sections.
-8. Generates section-level summaries.
-9. Produces a structured research-paper overview.
-
----
-
-# Development Roadmap
-
-Atlas is being developed incrementally, with evaluation performed before increasing system complexity so that new components are introduced because they solve an observed problem rather than simply because they are more advanced.
-
-## Completed — Retrieval Foundation
-
-- [x] Chunk representation and source metadata
-- [x] Character-based chunking baseline
-- [x] Sentence-aware chunking
-- [x] Dense document embeddings
-- [x] Vector similarity retrieval
-- [x] Top-k ranking
-- [x] External evaluation cases
-- [x] Hit@1 and Hit@3 evaluation
-- [x] Chunking experiment
-- [x] Cross-encoder reranking
-- [x] Dense vs. reranked comparison
-
----
-
-## Completed — Paper Understanding Foundation
-
-- [x] Research-paper section detection
-- [x] Section-name normalization
-- [x] Numbered-heading parsing
-- [x] Extractive summarization baseline
-- [x] Sentence embedding comparison
-- [x] PyTorch-based tensor ranking
-- [x] Transformer-based abstractive summarization
-- [x] Token-aware long-section chunking
-- [x] Hierarchical summarization
-- [x] Pretrained transformer inference
-- [x] Structured paper overview
-
----
-
-## Next — Real Research Papers
-
-The current paper-understanding pipeline has only been tested on controlled sample text, so the next milestone is to move from synthetic examples to real academic papers where formatting, section structure, terminology, and document length are substantially less predictable.
-
-Planned work includes:
-
-- [ ] Load real research-paper text
-- [ ] Add PDF text extraction
-- [ ] Test section detection across different paper formats
-- [ ] Handle missing or unusual section headings
-- [ ] Evaluate long Methods and Results sections
-- [ ] Identify formatting artifacts from PDF extraction
-- [ ] Evaluate summarization factual consistency
-- [ ] Compare extractive and abstractive summaries
-- [ ] Develop a structured paper-level synopsis
-
-A target user-facing overview may eventually resemble:
+The following should also remain excluded:
 
 ```text
-Research Question
-
-Why It Matters
-
-Methods
-
-Main Findings
-
-Limitations
-
-Conclusion
+.env
+Streamlit secrets
+private papers
+local generated reports where configured
 ```
 
-This structure would allow users to understand a paper at a high level before deciding what more specific questions they want to ask.
+When optional hosted generation is used, selected evidence and the question are sent to the configured model provider.
+
+Atlas is a research-assistance prototype and is not a clinical decision-support system.
 
 ---
 
-## Next — Retrieval Evaluation at Larger Scale
+# 35. Security and trust boundaries
 
-The initial retrieval benchmark is intentionally small and currently saturated, so the next retrieval evaluation stage will make the task more difficult before Atlas attempts to claim that reranking or another retrieval modification improves performance.
+Atlas treats uploaded paper text and user questions as untrusted prompt data.
 
-Planned work includes:
+Prompt boundaries reduce accidental instruction mixing but do not constitute a complete prompt-injection defense.
 
-- [ ] Load external source documents
-- [ ] Expand the document corpus
-- [ ] Add more difficult and ambiguous queries
-- [ ] Introduce distractor passages
-- [ ] Expand retrieval ground truth
-- [ ] Add MRR and/or Recall@k
-- [ ] Measure when reranking improves retrieval
+The project does not claim complete protection against adversarial document instructions, indirect prompt injection, semantic citation misuse, or model-level jailbreak behavior.
 
-Potential experiments include:
+Those need separate evaluation before production deployment.
+
+---
+
+# 36. Current limitations
+
+Atlas remains a research prototype.
+
+### Benchmark size
+
+The real-paper benchmark currently covers one published paper and six reviewed questions.
+
+### Chunk readability
+
+The current token overlap can cause chunks to begin partway through a sentence.
+
+### PDF extraction
+
+Line breaks, hyphenation, tables, equations, and multi-column layouts may be imperfect.
+
+### OCR
+
+Image-only PDFs are not supported.
+
+### Semantic entailment
+
+Quote validation does not prove that a quote supports the associated claim.
+
+### Scholarly metadata
+
+OpenAlex and Crossref coverage is incomplete and changes over time.
+
+### Recommendation quality
+
+The recommendation weights are transparent heuristics rather than empirically calibrated probabilities of paper quality.
+
+### Generation evaluation
+
+The structured generation layer is implemented and covered by automated tests using mocked HTTP responses, but a larger live benchmark of answer faithfulness, abstention, prompt-injection resilience, and multilingual performance remains future work.
+
+---
+
+# 37. Development roadmap
+
+## Completed — retrieval foundation
+
+- [x] character baseline
+- [x] sentence grouping experiment
+- [x] tokenizer-aware chunking
+- [x] dense embeddings
+- [x] exact cosine retrieval
+- [x] top-k candidate retrieval
+- [x] cross-encoder reranking
+- [x] synthetic evaluation
+- [x] Hit@1 / Hit@3
+- [x] MRR
+- [x] graded relevance
+- [x] NDCG@3
+- [x] answerability labels
+- [x] unanswerable cases
+
+## Completed — discovery
+
+- [x] OpenAlex search
+- [x] Crossref fallback
+- [x] DOI normalization
+- [x] deduplication
+- [x] recommendation preferences
+- [x] citation metadata
+- [x] affiliations
+- [x] citing-paper examples
+- [x] editorial-update checks
+- [x] retraction / concern handling
+- [x] reading-list export
+- [x] RIS export
+
+## Completed — reading workflow
+
+- [x] PDF / TXT / Markdown upload
+- [x] page-aware PDF extraction
+- [x] document fingerprints
+- [x] evidence preview
+- [x] structured generation layer
+- [x] source-ID validation
+- [x] exact quote validation
+- [x] insufficiency / invalid / refusal states
+- [x] four-section overview
+- [x] Streamlit workflow
+
+## Completed — evaluation
+
+- [x] four-level manual relevance grading
+- [x] reviewed-label exports
+- [x] judged-pool evaluation
+- [x] complete-corpus safeguards
+- [x] synthetic benchmark
+- [x] published-paper pilot
+- [x] 68 automated tests
+
+## Next — chunk readability
+
+- [ ] normalize PDF line-break artifacts
+- [ ] normalize split-word hyphenation where safe
+- [ ] construct chunks from complete sentence units
+- [ ] use whole-sentence overlap
+- [ ] retain hard token ceilings
+- [ ] handle unusually long individual sentences
+- [ ] rerun the current synthetic and real-paper benchmarks
+- [ ] evaluate readability separately from retrieval relevance
+
+## Next — larger evaluation
+
+- [ ] multiple published papers
+- [ ] 25–60+ reviewed questions
+- [ ] multiple research domains
+- [ ] independent reviewers
+- [ ] inter-rater agreement
+- [ ] pooled dense + reranked judgments
+- [ ] held-out evaluation questions
+
+## Next — semantic support
+
+- [ ] entailment-oriented checks
+- [ ] contradiction detection
+- [ ] claim-to-source support metrics
+- [ ] adversarial faithfulness cases
+
+## Future
+
+Potential directions include:
+
+- BM25 / hybrid retrieval,
+- alternative embeddings and rerankers,
+- multi-paper retrieval,
+- persistent research libraries,
+- conflicting-source comparison,
+- query expansion,
+- semantic entailment evaluation,
+- local generation backends,
+- and user studies with domain experts.
+
+---
+
+# 38. Design principles
+
+**Measure before assuming improvement.**
+
+New components should be evaluated against a baseline.
+
+**Prefer inspectable systems.**
+
+Users should be able to see why a paper was recommended and what evidence an answer used.
+
+**Keep components modular.**
+
+Retrieval, reranking, generation, and evaluation should be independently replaceable.
+
+**Separate retrieval from generation.**
+
+A retrieval failure and a generation failure are different problems.
+
+**Do not turn metadata into truth.**
+
+Citations and affiliations are signals, not guarantees.
+
+**Do not turn citations into entailment.**
+
+A real source can still be interpreted incorrectly.
+
+**Document neutral and negative results.**
+
+A change that does not improve a metric can still teach something.
+
+**Increase complexity only when justified.**
+
+Vector databases, agents, hybrid search, and model-based judges are experiments to evaluate, not automatic upgrades.
+
+---
+
+# 39. What Atlas is not
+
+Atlas is not:
+
+- a systematic-review engine,
+- a guarantee that recommended papers are correct,
+- a clinical decision-support system,
+- a replacement for domain expertise,
+- or a claim of hallucination-free generation.
+
+It is an evaluation-driven research-assistance prototype built to make the evidence path more visible.
+
+---
+
+# 40. Where I want to take Atlas next
+
+The first version answered an engineering question for me:
+
+> Can I build a transparent retrieval and evaluation pipeline that works beyond a toy example?
+
+The next stage is more product-driven.
+
+The chunking issue from the real-paper pilot is a good example. Atlas retrieved the right information, but some passages began halfway through sentences or included more surrounding material than a user should have to parse.
+
+Technically correct retrieval is not enough if the evidence is unpleasant to read.
+
+The next chunking iteration will therefore focus on complete sentence units, whole-sentence overlap, and PDF text cleanup. The existing benchmark gives me a way to test whether readability improves without degrading retrieval.
+
+Beyond that, I want to expand the evaluation across more papers and domains, use independent reviewers, measure inter-rater agreement, and test semantic entailment separately from quote integrity.
+
+The long-term product is not meant to replace someone who has spent twenty years becoming an expert in a field.
+
+It should help that person spend less of their limited time sorting through what changed and more of it applying the expertise they already have.
+
+---
+
+# 41. Primary references
+
+- [OpenAlex API](https://help.openalex.org/api/)
+- [OpenAlex work metadata](https://help.openalex.org/data/works/attributes/)
+- [Crossref REST API](https://github.com/CrossRef/rest-api-doc)
+- [Crossref Retraction Watch metadata](https://www.crossref.org/documentation/retrieve-metadata/retraction-watch/)
+- [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+- [Streamlit](https://docs.streamlit.io/)
+- [Sentence Transformers — all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+- [Cross Encoder — ms-marco-MiniLM-L6-v2](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2)
+
+---
+
+# 42. Current status
 
 ```text
-Character vs. sentence vs. token chunking
+68 automated tests passing
 
-Different chunk sizes
+Controlled synthetic retrieval benchmark
+5 documents
+4 questions
+Hit@3:   1.000
+MRR:     0.833
+NDCG@3:  0.953
 
-Dense vs. lexical retrieval
+Human-reviewed published-paper pilot
+6 questions
+5 answerable
+1 intentionally unanswerable
+Hit@1:   0.600
+Hit@3:   1.000
+MRR:     0.800
+NDCG@3:  0.938
 
-Dense vs. hybrid retrieval
-
-Retrieval with vs. without reranking
-
-Different candidate-set sizes
+Live scholarly discovery
+2 topics
+30 fetched records per topic
+12 leading candidates checked
+3 recommendations returned per run
 ```
 
-The goal is not to implement every option, but rather to use evaluation to determine which changes are justified.
+Atlas is still being built.
 
----
-
-## Planned — Model Adaptation and Fine-Tuning
-
-The current summarization model uses pretrained weights without modification, but a later Atlas stage will introduce actual model adaptation so that the project can move beyond inference and begin measuring whether changes to model parameters improve research-paper understanding.
-
-The intended progression is:
-
-```text
-Pretrained Model
-      ↓
-Establish Baseline
-      ↓
-Atlas Training Data
-      ↓
-Fine-Tuning / Parameter-Efficient Adaptation
-      ↓
-Modified Model Weights
-      ↓
-Evaluation
-      ↓
-Compare Against Baseline
-```
-
-This stage will introduce concepts such as:
-
-- training and validation data
-- forward passes
-- loss functions
-- gradients
-- backpropagation
-- optimizers
-- weight updates
-- overfitting
-- hyperparameter selection
-- parameter-efficient fine-tuning
-- model comparison
-
-Potential methods include LoRA or other PEFT approaches, which would allow Atlas to adapt a pretrained transformer without requiring every parameter in the original model to be retrained.
-
-The goal, however, is not to fine-tune a model simply to add another technique to the project; instead, model adaptation should be evaluated against the pretrained baseline to determine whether it measurably improves the tasks Atlas is designed to perform.
-
----
-
-## Planned — Grounded Generation
-
-Once retrieval and paper-understanding performance can be evaluated meaningfully, the two branches can begin operating together.
-
-```text
-Question
-    ↓
-Retrieval
-    ↓
-Reranking
-    ↓
-Evidence
-    ↓
-Generation Model
-    ↓
-Grounded Answer
-```
-
-Planned capabilities include:
-
-- answer generation from retrieved context
-- source attribution
-- passage-level citations
-- instructions to avoid unsupported claims
-- handling cases where retrieved evidence is insufficient
-
-A future paper workflow could therefore resemble:
-
-```text
-Research Paper
-      ↓
-Structured Overview
-      ↓
-User asks follow-up question
-      ↓
-Dense Retrieval
-      ↓
-Cross-Encoder Reranking
-      ↓
-Relevant Evidence
-      ↓
-Grounded Answer
-```
-
-This structure allows Atlas to provide enough context for the user to understand the paper first, rather than requiring the user to know exactly what they want to ask before they have seen a synopsis.
-
----
-
-## Planned — Answer and Summary Evaluation
-
-Retrieval quality does not guarantee generation quality, while a fluent summary does not guarantee factual accuracy; therefore, Atlas will evaluate generated outputs separately from retrieval performance.
-
-Potential evaluation dimensions include:
-
-```text
-Relevance
-    +
-Grounding
-    +
-Factual Consistency
-    +
-Citation Support
-```
-
-Possible methods include:
-
-- deterministic checks
-- semantic similarity
-- source-to-summary consistency checks
-- manually labeled evaluation cases
-- LLM-based judges with human validation
-- comparison against reference summaries
-
-The current extractive and transformer summarizers provide the first two baselines for these later experiments.
-
----
-
-## Future — Research Agent
-
-The longer-term direction is to move from a single retrieval request toward multi-step research, where Atlas can determine that a complex question requires several pieces of evidence rather than treating every request as a single vector search.
-
-A future pipeline may resemble:
-
-```text
-User question
-      ↓
-Query classification
-      ↓
-Question decomposition
-      ↓
-Research planning
-      ↓
-Multiple retrieval operations
-      ↓
-Evidence reranking
-      ↓
-Evidence synthesis
-      ↓
-Grounded answer + citations
-      ↓
-Evaluation
-```
-
----
-
-## Future — Adaptive Research and Tutoring
-
-A further extension is to make Atlas responsive to the user's knowledge and research process, but these capabilities are intentionally downstream of retrieval, document understanding, generation, and evaluation because the project first needs reliable ways to retrieve, summarize, generate, and measure evidence before introducing autonomous behavior.
-
-Potential capabilities include:
-
-- identifying missing evidence
-- asking clarifying questions
-- adapting explanations to the user's demonstrated understanding
-- tracking unresolved research questions
-- comparing conflicting sources
-- identifying uncertainty
-- revising retrieval strategies after weak results
-
----
-
-# Design Philosophy
-
-Atlas follows several principles during development.
-
-### Measure before assuming improvement.
-
-New components should be evaluated against an existing baseline whenever possible, which is why the project currently retains both extractive and abstractive summarization approaches rather than assuming that the generative model is automatically superior.
-
-### Prefer simple baselines first.
-
-Character chunking, Hit@k, and extractive summarization are intentionally simple because they create reference points that more sophisticated approaches can later be compared against.
-
-### Keep components modular.
-
-Chunking, retrieval, reranking, parsing, summarization, generation, and evaluation should remain replaceable independently so that changing one stage does not require rebuilding the entire system.
-
-### Separate retrieval quality from generation quality.
-
-A poor answer can result from failed retrieval, failed ranking, failed summarization, or failed generation, so evaluating these stages separately makes failures easier to diagnose and prevents one strong component from masking another weak one.
-
-### Treat fluency and factual accuracy as different properties.
-
-A generated response may sound better while being less faithful to the source, which the initial transformer summarization experiment demonstrated when the model produced more natural text but also introduced unsupported information.
-
-### Document unsuccessful or neutral experiments.
-
-A change does not need to improve a metric to provide useful information because, for example, reranking currently preserves rather than improves Hit@k because the initial benchmark is saturated, while the pretrained abstractive summarizer produces more natural language but can also introduce unsupported claims.
-
-Both outcomes help determine what Atlas should test next.
-
-### Increase complexity only when justified.
-
-More advanced techniques such as semantic chunking, hybrid search, fine-tuning, agentic retrieval, or LLM-based evaluation are treated as hypotheses to test rather than automatic upgrades, because additional complexity is only useful if it produces a measurable improvement or solves a problem that the simpler baseline cannot.
-
----
-
-# Current Status
-
-Atlas currently has two integrated foundations: an evaluation-driven retrieval pipeline using sentence-aware chunking, dense retrieval, cross-encoder reranking, and Hit@k evaluation, along with an initial research-paper understanding pipeline using section parsing, extractive summarization, pretrained transformer-based abstractive summarization, PyTorch tensor operations, and hierarchical long-section summarization.
-
-Both pipelines currently operate on controlled test inputs, so the immediate next milestone is to move Atlas from synthetic examples to real research papers and larger document collections, which will make it possible to evaluate retrieval quality, reranking quality, section-parsing reliability, summary quality, factual consistency, and eventually model adaptation before adding increasingly complex generation and agentic behavior.
+The objective is not to make research uncertainty disappear behind a polished answer. It is to help someone who already has expertise keep pace with a changing field while making the paper-selection logic, retrieved evidence, evaluation results, and system limitations easier to inspect.

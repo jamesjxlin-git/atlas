@@ -1,0 +1,116 @@
+[
+  {
+    "query": "What study design was used and how many primary care managers responded?\n",
+    "answerable": true,
+    "labels": {
+      "73128206e08e4be68dbc0826": {
+        "grade": 3,
+        "rationale": ""
+      },
+      "914f0992631791e2df2d41fb": {
+        "grade": 2,
+        "rationale": ""
+      },
+      "902653dc4bcbb3cc5408407a": {
+        "grade": 1,
+        "rationale": ""
+      }
+    },
+    "label_scope": "judged_pool"
+  },
+  {
+    "query": "What were the most common forms of collaboration during innovation activities?",
+    "answerable": true,
+    "labels": {
+      "eb4f9c25c4c4b6a85238c6e2": {
+        "grade": 2,
+        "rationale": ""
+      },
+      "07bed3dbc75e4c5580ea10ed": {
+        "grade": 3,
+        "rationale": ""
+      },
+      "af8938e056f9299fe297d2a1": {
+        "grade": 0,
+        "rationale": ""
+      }
+    },
+    "label_scope": "judged_pool"
+  },
+  {
+    "query": "What factors did primary care managers identify as barriers to innovation?\n",
+    "answerable": true,
+    "labels": {
+      "5bc965c5f086d785d02fd82a": {
+        "grade": 3,
+        "rationale": ""
+      },
+      "354e411478d5ab9e2a4f1cc9": {
+        "grade": 3,
+        "rationale": ""
+      },
+      "c1564c76dd58422e6c88ebea": {
+        "grade": 1,
+        "rationale": ""
+      }
+    },
+    "label_scope": "judged_pool"
+  },
+  {
+    "query": "Why can this study not establish causality?",
+    "answerable": true,
+    "labels": {
+      "97bb1eb57db441443496072b": {
+        "grade": 3,
+        "rationale": ""
+      },
+      "63611f9fa3852d8e2ec38409": {
+        "grade": 0,
+        "rationale": ""
+      },
+      "71b1f23a96731897d5c50e3c": {
+        "grade": 0,
+        "rationale": ""
+      }
+    },
+    "label_scope": "judged_pool"
+  },
+  {
+    "query": "What limitations could affect how representative the study findings are?",
+    "answerable": true,
+    "labels": {
+      "97bb1eb57db441443496072b": {
+        "grade": 2,
+        "rationale": ""
+      },
+      "c696dca5de6c1f89020d1250": {
+        "grade": 3,
+        "rationale": ""
+      },
+      "e6a78e69553b591826951a07": {
+        "grade": 2,
+        "rationale": ""
+      }
+    },
+    "label_scope": "judged_pool"
+  },
+  {
+    "query": "What causal effect did innovation have on patient health outcomes?",
+    "answerable": false,
+    "labels": {
+      "99421580e0920174cceea090": {
+        "grade": 0,
+        "rationale": ""
+      },
+      "761578574a5e851f28044cce": {
+        "grade": 0,
+        "rationale": ""
+      },
+      "297c5f787a40fec7262635ce": {
+        "grade": 0,
+        "rationale": ""
+      }
+    },
+    "label_scope": "judged_pool"
+  }
+]

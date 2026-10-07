@@ -1,0 +1,2 @@
+Synthetic research fixture: study methods.
+The study enrolled 500 university students aged 18 to 25. Participants were recruited at a single campus. Researchers measured sleep duration and examination scores using an observational cohort design. Participants were not randomly assigned to a treatment. The data therefore cannot establish that longer sleep causes better examination performance.

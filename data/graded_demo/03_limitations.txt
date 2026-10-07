@@ -1,0 +1,2 @@
+Synthetic research fixture: limitations.
+Sleep duration was self-reported and may contain measurement error. The observational design leaves potential confounding by stress and study time. Recruitment at a single campus limits generalizability. Follow-up covered one examination period, so the study does not establish long-term effects. These limitations prevent a causal claim about sleep and examination performance.
